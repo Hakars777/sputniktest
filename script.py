@@ -101,9 +101,6 @@ def monitor_news(chat_id):
 @bot.message_handler(commands=['start'])
 def start_command(message):
     chat_id = message.chat.id
-    
-    active_chats[chat_id] = True  # Чат сразу добавляется в активные
-
 
     if chat_id not in ALLOWED_CHATS:
         return
@@ -111,6 +108,8 @@ def start_command(message):
     if chat_id in active_chats:
         bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
         return
+    
+    active_chats[chat_id] = True  # Чат сразу добавляется в активные
 
     thread = threading.Thread(target=monitor_news, args=(chat_id,), daemon=True)
     thread.start()
