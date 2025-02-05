@@ -23,20 +23,13 @@ BASE_URL = "https://am.sputniknews.ru"
 
 
 def send_telegram_message(chat_id, message):
-    """
-    Отправляет сообщение в Telegram только для разрешённых chat_id.
-    """
+    """Отправляет сообщение в Telegram только для разрешённых chat_id."""
     if chat_id in ALLOWED_CHATS:
         bot.send_message(chat_id, message)
 
 
 def get_first_post(driver):
-    """
-    Ожидает появления первого элемента с классом 'list__item' и извлекает:
-      - заголовок,
-      - дату,
-      - ссылку.
-    """
+    """Получает первый пост с сайта."""
     list_item = WebDriverWait(driver, 30).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, ".list__item"))
     )
@@ -54,13 +47,9 @@ def get_first_post(driver):
 
 
 def monitor_news(chat_id):
-    """
-    Функция мониторинга новостей, работающая в фоновом потоке для каждого чата.
-    """
+    """Функция мониторинга новостей, работающая в фоновом потоке для каждого чата."""
     if chat_id not in ALLOWED_CHATS:
         return  # Игнорируем чаты, которым не разрешено получать уведомления
-
-    active_chats[chat_id] = True
 
     chrome_options = Options()
     chrome_options.add_argument("--headless")
@@ -82,12 +71,12 @@ def monitor_news(chat_id):
     except Exception as e:
         send_telegram_message(chat_id, f"Ошибка при получении начального поста: {e}")
         driver.quit()
-        active_chats[chat_id] = False
+        active_chats.pop(chat_id, None)  # Удаляем чат из активных при ошибке
         return
 
     current_date = date_text
 
-    while active_chats.get(chat_id, False):
+    while chat_id in active_chats:
         time.sleep(3600)  # Проверяем раз в час
         try:
             driver.refresh()
@@ -105,6 +94,7 @@ def monitor_news(chat_id):
             send_telegram_message(chat_id, f"Ошибка при проверке нового поста: {e}")
 
     driver.quit()
+    active_chats.pop(chat_id, None)  # Удаляем чат из активных после завершения
 
 
 # Обработчик команды /start
@@ -112,10 +102,13 @@ def monitor_news(chat_id):
 def start_command(message):
     chat_id = message.chat.id
     
+    active_chats[chat_id] = True  # Чат сразу добавляется в активные
+
+
     if chat_id not in ALLOWED_CHATS:
         return
 
-    if active_chats.get(chat_id, False):
+    if chat_id in active_chats:
         bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
         return
 
@@ -127,15 +120,7 @@ def start_command(message):
 @bot.message_handler(commands=['stop'])
 def stop_command(message):
     chat_id = message.chat.id
-    
-    if chat_id not in ALLOWED_CHATS:
-        return
-
-    if not active_chats.get(chat_id, False):
-        bot.send_message(chat_id, "Мониторинг остановлен.")
-        return
-
-    active_chats[chat_id] = False
+    active_chats.pop(chat_id, None)  # Полностью удаляем чат из списка активных
 
 
 # Запуск бота
