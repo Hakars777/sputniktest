@@ -12,7 +12,7 @@ TELEGRAM_BOT_TOKEN = "8054009340:AAFSdbb7C7xaQjaFOVgePNXCLFxdnNxgeYE"
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # Разрешённые чаты (только для указанных chat_id)
-ALLOWED_CHATS = {1032063058, 287714154}  # Добавьте нужные chat_id
+ALLOWED_CHATS = {287714154, 1032063058}  # Добавьте нужные chat_id
 
 # Флаг работы мониторинга для каждого чата
 active_chats = {}
@@ -23,13 +23,20 @@ BASE_URL = "https://am.sputniknews.ru"
 
 
 def send_telegram_message(chat_id, message):
-    """Отправляет сообщение в Telegram только для разрешённых chat_id."""
+    """
+    Отправляет сообщение в Telegram только для разрешённых chat_id.
+    """
     if chat_id in ALLOWED_CHATS:
         bot.send_message(chat_id, message)
 
 
 def get_first_post(driver):
-    """Получает первый пост с сайта."""
+    """
+    Ожидает появления первого элемента с классом 'list__item' и извлекает:
+      - заголовок,
+      - дату,
+      - ссылку.
+    """
     list_item = WebDriverWait(driver, 30).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, ".list__item"))
     )
@@ -47,9 +54,13 @@ def get_first_post(driver):
 
 
 def monitor_news(chat_id):
-    """Функция мониторинга новостей, работающая в фоновом потоке для каждого чата."""
+    """
+    Функция мониторинга новостей, работающая в фоновом потоке для каждого чата.
+    """
     if chat_id not in ALLOWED_CHATS:
         return  # Игнорируем чаты, которым не разрешено получать уведомления
+
+    active_chats[chat_id] = True
 
     chrome_options = Options()
     chrome_options.add_argument("--headless")
@@ -71,12 +82,12 @@ def monitor_news(chat_id):
     except Exception as e:
         send_telegram_message(chat_id, f"Ошибка при получении начального поста: {e}")
         driver.quit()
-        active_chats.pop(chat_id, None)  # Удаляем чат из активных при ошибке
+        active_chats[chat_id] = False
         return
 
     current_date = date_text
 
-    while chat_id in active_chats:
+    while active_chats.get(chat_id, False):
         time.sleep(3600)  # Проверяем раз в час
         try:
             driver.refresh()
@@ -94,7 +105,6 @@ def monitor_news(chat_id):
             send_telegram_message(chat_id, f"Ошибка при проверке нового поста: {e}")
 
     driver.quit()
-    active_chats.pop(chat_id, None)  # Удаляем чат из активных после завершения
 
 
 # Обработчик команды /start
@@ -103,15 +113,15 @@ def start_command(message):
     chat_id = message.chat.id
 
     if chat_id not in ALLOWED_CHATS:
+        bot.send_message(chat_id, "У вас нет доступа к этому боту.")
         return
 
-    if chat_id in active_chats:
-        bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
+    if active_chats.get(chat_id, False):
+        bot.send_message(chat_id, "Мониторинг уже запущен.")
         return
 
-    active_chats[chat_id] = True  # Чат сразу добавляется в активные
+    bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
     thread = threading.Thread(target=monitor_news, args=(chat_id,), daemon=True)
-
     thread.start()
 
 
@@ -119,7 +129,17 @@ def start_command(message):
 @bot.message_handler(commands=['stop'])
 def stop_command(message):
     chat_id = message.chat.id
-    active_chats.pop(chat_id, None)  # Полностью удаляем чат из списка активных
+
+    if chat_id not in ALLOWED_CHATS:
+        bot.send_message(chat_id, "У вас нет доступа к этому боту.")
+        return
+
+    if not active_chats.get(chat_id, False):
+        bot.send_message(chat_id, "Мониторинг уже остановлен.")
+        return
+
+    active_chats[chat_id] = False
+    bot.send_message(chat_id, "Останавливаю мониторинг...")
 
 
 # Запуск бота
