@@ -10,7 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # Данные для Telegram-бота
-TELEGRAM_BOT_TOKEN = "8054009340:AAFSdbb7C7xaQjaFOVgePNXCLFxdnNxgeYE"
+TELEGRAM_BOT_TOKEN = "7816691902:AAGDGRYn9pILVyhlCTrE81HIaOITeHjXa1Y"
 # ID чата (будет автоматически обновляться при /start)
 CHAT_ID = "1032063058"
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
