@@ -108,10 +108,10 @@ def start_command(message):
     if chat_id in active_chats:
         bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
         return
-    
-    active_chats[chat_id] = True  # Чат сразу добавляется в активные
 
+    active_chats[chat_id] = True  # Чат сразу добавляется в активные
     thread = threading.Thread(target=monitor_news, args=(chat_id,), daemon=True)
+
     thread.start()
 
 
