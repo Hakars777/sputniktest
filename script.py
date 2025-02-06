@@ -74,8 +74,6 @@ def check_site(driver, site_label, url, base_url, baseline):
                            f"Ссылка: {new_baseline[2]}")
                 return new_baseline, message
             return new_baseline, None
-        else:
-            return baseline, f"[{site_label}] Постов нет на странице."
     except Exception as e:
         return
 
@@ -83,7 +81,6 @@ def monitor_news(chat_id):
     """Основная функция мониторинга: сначала отправляются исходные посты, затем — периодические проверки."""
     baseline_posts = {site: None for site in SITES}
 
-    # Используем один драйвер для всего цикла мониторинга
     try:
         driver = create_driver()  # Инициализация драйвера
     except Exception as e:
@@ -101,21 +98,22 @@ def monitor_news(chat_id):
                                 f"Дата: {posts[0][1]}\n"
                                 f"Ссылка: {posts[0][2]}")
                 send_telegram_message(chat_id, init_message)
-            else:
-                send_telegram_message(chat_id, f"[{site}] Постов нет на странице.")
         except Exception as e:
             return
-    
+    driver.quit()  # Закрытие драйвера после первичной проверки
+
     # Основной цикл мониторинга
     while chat_id in active_chats:
         try:
+            driver = create_driver()  # Новый драйвер для следующего цикла мониторинга
             for site, (url, base_url) in SITES.items():
                 new_baseline, msg = check_site(driver, site, url, base_url, baseline_posts[site])
                 if msg:
                     send_telegram_message(chat_id, msg)
                 baseline_posts[site] = new_baseline
+            driver.quit()  # Закрытие драйвера после каждой итерации
         except Exception as e:
-            return
+            send_telegram_message(chat_id, f"Ошибка при создании браузера: {e}")
         time.sleep(1800)  # Интервал проверки – 30 минут
 
 @bot.message_handler(commands=['start'])
