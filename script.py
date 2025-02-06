@@ -62,6 +62,8 @@ def monitor_news_site(chat_id, url, base_url, site_label):
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--log-level=3")        
+    chrome_options.add_argument("--disable-software-rasterizer")
 
     driver = webdriver.Chrome(options=chrome_options)
     driver.get(url)
@@ -87,7 +89,7 @@ def monitor_news_site(chat_id, url, base_url, site_label):
         return
 
     while chat_id in active_chats:
-        time.sleep(18)  # Проверяем раз в час
+        time.sleep(1800)  # Проверяем раз в час
         try:
             driver.refresh()
             posts = get_all_posts(driver, base_url)
