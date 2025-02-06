@@ -15,7 +15,7 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 ALLOWED_CHATS = {1032063058, 287714154}
 active_chats = {}
 
-# Параметры сайтов в виде словаря
+# Параметры сайтов
 SITES = {
     "RU": {"url": "https://am.sputniknews.ru/search/?query=%D0%95%D0%90%D0%AD%D0%A1", "base": "https://am.sputniknews.ru"},
     "AM": {"url": "https://arm.sputniknews.ru/search/?query=%D4%B5%D4%B1%D5%8F%D5%84", "base": "https://arm.sputniknews.ru"}
@@ -26,7 +26,9 @@ def send_telegram_message(chat_id, message):
         bot.send_message(chat_id, message)
 
 def get_all_posts(driver, base_url):
-    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".list__item")))
+    WebDriverWait(driver, 30).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, ".list__item"))
+    )
     posts = []
     for item in driver.find_elements(By.CSS_SELECTOR, ".list__item"):
         title_el = item.find_element(By.CSS_SELECTOR, ".list__title")
@@ -39,7 +41,8 @@ def get_all_posts(driver, base_url):
     return posts
 
 def init_site(driver, label, chat_id):
-    url, base = SITES[label]["url"], SITES[label]["base"]
+    url = SITES[label]["url"]
+    base = SITES[label]["base"]
     driver.get(url)
     posts = get_all_posts(driver, base)
     if posts:
@@ -50,7 +53,8 @@ def init_site(driver, label, chat_id):
     return None
 
 def check_site(driver, label, baseline, chat_id):
-    url, base = SITES[label]["url"], SITES[label]["base"]
+    url = SITES[label]["url"]
+    base = SITES[label]["base"]
     driver.get(url)
     posts = get_all_posts(driver, base)
     if posts:
@@ -73,29 +77,36 @@ def monitor_news_sites(chat_id):
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--log-level=3")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    driver = webdriver.Chrome(options=chrome_options)
-
-    baseline_ru = init_site(driver, "RU", chat_id)
+    
+    # Создаём отдельные драйверы для каждого сайта
+    driver_ru = webdriver.Chrome(options=chrome_options)
+    driver_am = webdriver.Chrome(options=chrome_options)
+    
+    baseline_ru = init_site(driver_ru, "RU", chat_id)
     if not baseline_ru:
-        driver.quit()
+        driver_ru.quit()
+        driver_am.quit()
         return
-    baseline_am = init_site(driver, "AM", chat_id)
+    baseline_am = init_site(driver_am, "AM", chat_id)
     if not baseline_am:
-        driver.quit()
+        driver_ru.quit()
+        driver_am.quit()
         return
 
+    # Основной цикл мониторинга (один поток, два драйвера)
     while chat_id in active_chats:
         try:
-            baseline_ru = check_site(driver, "RU", baseline_ru, chat_id)
+            baseline_ru = check_site(driver_ru, "RU", baseline_ru, chat_id)
         except Exception:
             pass
         try:
-            baseline_am = check_site(driver, "AM", baseline_am, chat_id)
+            baseline_am = check_site(driver_am, "AM", baseline_am, chat_id)
         except Exception:
             pass
-        time.sleep(1800)  # Задержка между итерациями
+        time.sleep(1800)  # Задержка между проверками (30 минут)
 
-    driver.quit()
+    driver_ru.quit()
+    driver_am.quit()
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
@@ -107,6 +118,7 @@ def start_command(message):
         return
     active_chats[chat_id] = True
     bot.send_message(chat_id, "Начинаю мониторинг...")
+    # Запускаем мониторинг в одном потоке (с двумя драйверами)
     threading.Thread(target=monitor_news_sites, args=(chat_id,), daemon=True).start()
 
 @bot.message_handler(commands=['stop'])
