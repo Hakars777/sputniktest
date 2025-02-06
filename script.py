@@ -60,11 +60,16 @@ def monitor_news_site(chat_id, url, base_url, site_label):
     """
     chrome_options = Options()
     chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--log-level=3")        
+    chrome_options.add_argument("--disable-gpu")  # Отключение GPU-ускорения
+    chrome_options.add_argument("--no-sandbox")  # Отключение sandbox (нужен для некоторых серверных окружений)
     chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-dev-shm-usage")  # Включение использования обычной памяти вместо shared memory
+    chrome_options.add_argument("--remote-debugging-port=9222")  # Возможность отладки через порт
+    chrome_options.add_argument("--disable-extensions")  # Отключение расширений
+    chrome_options.add_argument("--disable-features=VizDisplayCompositor")  # Отключение некоторых функций, которые могут вызвать ошибки
+    chrome_options.add_argument("--start-maximized")  # Запуск максимизированного окна (не обязательно для headless)
+    chrome_options.add_argument("--no-zygote")  # Еще один флаг, помогающий избежать ошибок в некоторых средах
+    chrome_options.add_argument("--single-process")  # Запуск в одном процессе (может помочь на облачных серверах)
 
     # Создание нового экземпляра драйвера для каждого потока
     driver = webdriver.Chrome(options=chrome_options)
