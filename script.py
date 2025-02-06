@@ -64,6 +64,7 @@ def monitor_news_site(chat_id, url, base_url, site_label):
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--log-level=3")        
     chrome_options.add_argument("--disable-software-rasterizer")
+    chrome_options.add_argument("--disable-dev-shm-usage")
 
     driver = webdriver.Chrome(options=chrome_options)
     driver.get(url)
