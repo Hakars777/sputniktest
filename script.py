@@ -113,7 +113,7 @@ def monitor_news(chat_id):
                 baseline_posts[site] = new_baseline
             driver.quit()  # Закрытие драйвера после каждой итерации
         except Exception as e:
-            send_telegram_message(chat_id, f"Ошибка при создании браузера: {e}")
+            return
         time.sleep(1800)  # Интервал проверки – 30 минут
 
 @bot.message_handler(commands=['start'])
