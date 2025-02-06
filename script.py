@@ -11,8 +11,8 @@ ALLOWED_CHATS = {1032063058, 287714154}
 
 # Формат: "Метка": (URL, базовый URL)
 SITES = {
-    "RU": ("https://am.sputniknews.ru/search/?query=%D0%95%D0%90%D0%AD%D0%A1", "https://am.sputniknews.ru"),
-    "AM": ("https://arm.sputniknews.ru/search/?query=%D4%B5%D4%B1%D5%8F%D5%84", "https://arm.sputniknews.ru")
+    "AM": ("https://arm.sputniknews.ru/search/?query=%D4%B5%D4%B1%D5%8F%D5%84", "https://arm.sputniknews.ru"),
+    "RU": ("https://am.sputniknews.ru/search/?query=%D0%95%D0%90%D0%AD%D0%A1", "https://am.sputniknews.ru")
 }
 active_chats = {}
 
@@ -69,6 +69,7 @@ def monitor_news(chat_id):
                 driver.get(url)
             else:
                 driver.refresh()
+            time.sleep(1)
             posts = get_posts(driver, base)
             if posts and posts[0][1] != baseline[label][1]:
                 send_msg(chat_id,
