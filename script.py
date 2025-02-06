@@ -1,4 +1,3 @@
-import time
 import asyncio
 import telebot
 from selenium import webdriver
@@ -24,11 +23,13 @@ BASE_URL_ARM = "https://arm.sputniknews.ru"
 # Состояние активных чатов
 active_chats = {}
 
+# Отправка сообщения в Telegram
 async def send_telegram_message(chat_id, message):
     """Отправляет сообщение в Telegram только для разрешённых chat_id."""
     if chat_id in ALLOWED_CHATS:
         await bot.send_message(chat_id, message)
 
+# Получение всех постов на странице
 async def get_all_posts(driver, base_url):
     """Получает список всех постов на странице."""
     WebDriverWait(driver, 30).until(
@@ -47,6 +48,7 @@ async def get_all_posts(driver, base_url):
         posts.append((title_text, date_text, href))
     return posts
 
+# Функция мониторинга для одного сайта
 async def monitor_news_site(chat_id, url, base_url, site_label):
     """Функция мониторинга для одного сайта."""
     chrome_options = Options()
@@ -105,22 +107,16 @@ async def monitor_news_site(chat_id, url, base_url, site_label):
 
     driver.quit()
 
+# Запуск мониторинга для двух сайтов одновременно с использованием asyncio
 async def start_monitoring(chat_id):
-    """Запуск мониторинга для двух сайтов одновременно с использованием asyncio."""
+    """Запуск мониторинга для двух сайтов одновременно."""
     tasks = [
         monitor_news_site(chat_id, URL_AM, BASE_URL_AM, "RU"),
         monitor_news_site(chat_id, URL_ARM, BASE_URL_ARM, "AM")
     ]
     await asyncio.gather(*tasks)
 
-def start_bot_polling():
-    """Функция для запуска бота и обработки команд с использованием asyncio."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    # Начать polling
-    bot.polling(none_stop=True, interval=0)
-
+# Обработчик команды /start
 @bot.message_handler(commands=['start'])
 def start_command(message):
     chat_id = message.chat.id
@@ -130,12 +126,11 @@ def start_command(message):
         else:
             bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
             active_chats[chat_id] = True  # Добавляем чат в активные чаты
-            # Запуск мониторинга в отдельном потоке
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.create_task(start_monitoring(chat_id))
-            loop.run_forever()
+            # Запуск мониторинга в отдельном потоке для асинхронных задач
+            thread = Thread(target=asyncio.run, args=(start_monitoring(chat_id),))
+            thread.start()
 
+# Обработчик команды /stop
 @bot.message_handler(commands=['stop'])
 def stop_command(message):
     chat_id = message.chat.id
@@ -143,6 +138,4 @@ def stop_command(message):
     bot.send_message(chat_id, "Мониторинг остановлен.")
 
 if __name__ == "__main__":
-    # Запуск бота в отдельном потоке
-    thread = Thread(target=start_bot_polling)
-    thread.start()
+    bot.polling(none_stop=True)
