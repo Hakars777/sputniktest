@@ -5,7 +5,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from threading import Thread
+from threading import Thread, Event
 
 # Данные для Telegram-бота
 TELEGRAM_BOT_TOKEN = "8054009340:AAFSdbb7C7xaQjaFOVgePNXCLFxdnNxgeYE"
@@ -20,8 +20,8 @@ BASE_URL_AM = "https://am.sputniknews.ru"
 URL_ARM = "https://arm.sputniknews.ru/search/?query=%D4%B5%D4%B1%D5%8F%D5%84"
 BASE_URL_ARM = "https://arm.sputniknews.ru"
 
-# Состояние активных чатов
-active_chats = {}
+# Словарь для хранения запущенных потоков мониторинга по chat_id
+monitor_threads = {}
 
 # Отправка сообщения в Telegram
 async def send_telegram_message(chat_id, message):
@@ -49,7 +49,7 @@ async def get_all_posts(driver, base_url):
     return posts
 
 # Функция мониторинга для одного сайта
-async def monitor_news_site(chat_id, url, base_url, site_label):
+async def monitor_news_site(chat_id, url, base_url, site_label, stop_event: Event):
     """Функция мониторинга для одного сайта."""
     chrome_options = Options()
     chrome_options.add_argument("--headless")
@@ -79,40 +79,43 @@ async def monitor_news_site(chat_id, url, base_url, site_label):
         driver.quit()
         return
 
-    while chat_id in active_chats:
-        await asyncio.sleep(1800)  # Проверяем раз в час
-        try:
-            driver.refresh()
-            posts = await get_all_posts(driver, base_url)
-            if not posts:
-                continue
-            new_posts = []
-            for post in posts:
-                if post[1] == baseline_post[1]:
-                    break
-                new_posts.append(post)
-            if new_posts:
-                # Отправляем новые посты в порядке появления (от старых к новым)
-                for post in reversed(new_posts):
-                    message = (
-                        f"[{site_label}] Новый пост!\n"
-                        f"Заголовок: {post[0]}\n"
-                        f"Дата: {post[1]}\n"
-                        f"Ссылка: {post[2]}"
-                    )
-                    await send_telegram_message(chat_id, message)
-                baseline_post = posts[0]
-        except Exception as e:
-            return
-
-    driver.quit()
+    try:
+        while not stop_event.is_set():
+            await asyncio.sleep(1800)  # Проверяем раз в 30 минут
+            try:
+                driver.refresh()
+                posts = await get_all_posts(driver, base_url)
+                if not posts:
+                    continue
+                new_posts = []
+                # Собираем новые посты до тех пор, пока не встретим базовый
+                for post in posts:
+                    if post[1] == baseline_post[1]:
+                        break
+                    new_posts.append(post)
+                if new_posts:
+                    # Отправляем новые посты в порядке появления (от старых к новым)
+                    for post in reversed(new_posts):
+                        message = (
+                            f"[{site_label}] Новый пост!\n"
+                            f"Заголовок: {post[0]}\n"
+                            f"Дата: {post[1]}\n"
+                            f"Ссылка: {post[2]}"
+                        )
+                        await send_telegram_message(chat_id, message)
+                    baseline_post = posts[0]
+            except Exception as e:
+                # При ошибке завершаем мониторинг для данного сайта
+                break
+    finally:
+        driver.quit()
 
 # Запуск мониторинга для двух сайтов одновременно с использованием asyncio
-async def start_monitoring(chat_id):
+async def start_monitoring(chat_id, stop_event: Event):
     """Запуск мониторинга для двух сайтов одновременно."""
     tasks = [
-        monitor_news_site(chat_id, URL_AM, BASE_URL_AM, "RU"),
-        monitor_news_site(chat_id, URL_ARM, BASE_URL_ARM, "AM")
+        monitor_news_site(chat_id, URL_AM, BASE_URL_AM, "RU", stop_event),
+        monitor_news_site(chat_id, URL_ARM, BASE_URL_ARM, "AM", stop_event)
     ]
     await asyncio.gather(*tasks)
 
@@ -120,22 +123,28 @@ async def start_monitoring(chat_id):
 @bot.message_handler(commands=['start'])
 def start_command(message):
     chat_id = message.chat.id
-    if chat_id in ALLOWED_CHATS:
-        if chat_id in active_chats:
-            bot.send_message(chat_id, "Бот уже запущен! Мониторинг продолжается...")
-        else:
-            bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
-            active_chats[chat_id] = True  # Добавляем чат в активные чаты
-            # Запуск мониторинга в отдельном потоке для асинхронных задач
-            thread = Thread(target=asyncio.run, args=(start_monitoring(chat_id),))
-            thread.start()
+    if chat_id not in ALLOWED_CHATS:
+        return
+
+    if chat_id in monitor_threads:
+        bot.send_message(chat_id, "Бот уже запущен! Мониторинг продолжается...")
+    else:
+        bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
+        stop_event = Event()
+        thread = Thread(target=lambda: asyncio.run(start_monitoring(chat_id, stop_event)))
+        thread.start()
+        monitor_threads[chat_id] = (thread, stop_event)
 
 # Обработчик команды /stop
 @bot.message_handler(commands=['stop'])
 def stop_command(message):
     chat_id = message.chat.id
-    active_chats.pop(chat_id, None)  # Удаляем чат из списка активных
-    bot.send_message(chat_id, "Мониторинг остановлен.")
+    if chat_id in monitor_threads:
+        thread, stop_event = monitor_threads.pop(chat_id)
+        stop_event.set()
+        bot.send_message(chat_id, "Мониторинг остановлен.")
+    else:
+        bot.send_message(chat_id, "Мониторинг не запущен.")
 
 if __name__ == "__main__":
     bot.polling(none_stop=True)
