@@ -11,17 +11,19 @@ from selenium.webdriver.support import expected_conditions as EC
 TELEGRAM_BOT_TOKEN = "8054009340:AAFSdbb7C7xaQjaFOVgePNXCLFxdnNxgeYE"
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Разрешённые чаты
-ALLOWED_CHATS = {1032063058, 287714154}
+# Разрешённые чаты (только для указанных chat_id)
+ALLOWED_CHATS = {1032063058, 287714154}  # Добавьте нужные chat_id
 
-# URL-адреса сайтов
-SITES = {
-    "RU": ("https://am.sputniknews.ru/search/?query=%D0%95%D0%90%D0%AD%D0%A1", "https://am.sputniknews.ru"),
-    "AM": ("https://arm.sputniknews.ru/search/?query=%D4%B5%D4%B1%D5%8F%D5%84", "https://arm.sputniknews.ru"),
-}
-
-# Словарь активных чатов
+# Флаг работы мониторинга для каждого чата
 active_chats = {}
+
+# Параметры для сайта AM
+URL_AM = "https://am.sputniknews.ru/search/?query=%D0%95%D0%90%D0%AD%D0%A1"
+BASE_URL_AM = "https://am.sputniknews.ru"
+
+# Параметры для сайта ARM
+URL_ARM = "https://arm.sputniknews.ru/search/?query=%D4%B5%D4%B1%D5%8F%D5%84"
+BASE_URL_ARM = "https://arm.sputniknews.ru"
 
 def send_telegram_message(chat_id, message):
     """Отправляет сообщение в Telegram только для разрешённых chat_id."""
@@ -29,8 +31,11 @@ def send_telegram_message(chat_id, message):
         bot.send_message(chat_id, message)
 
 def get_all_posts(driver, base_url):
-    """Получает список всех постов со страницы."""
-    WebDriverWait(driver, 20).until(
+    """
+    Получает список всех постов на странице.
+    Каждый элемент списка – кортеж (title, date, href).
+    """
+    WebDriverWait(driver, 30).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, ".list__item"))
     )
     posts_elements = driver.find_elements(By.CSS_SELECTOR, ".list__item")
@@ -46,94 +51,111 @@ def get_all_posts(driver, base_url):
         posts.append((title_text, date_text, href))
     return posts
 
-def create_driver():
-    """Создаёт экземпляр Chrome с параметрами, пригодными для Docker и облачных серверов."""
+def monitor_news_site(chat_id, url, base_url, site_label):
+    """
+    Функция мониторинга для одного сайта.
+    Сначала определяется исходный (самый новый) пост, а затем раз в час проверяются все посты.
+    Если находятся новые посты (до исходного поста), они отправляются в Telegram (с пометкой site_label),
+    а исходный пост обновляется.
+    """
     chrome_options = Options()
-    chrome_options.add_argument("--headless")                   # Фоновый режим
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")        # Для предотвращения "tab crashed"
-    chrome_options.add_argument("--log-level=3")
+    chrome_options.add_argument("--log-level=3")        
     chrome_options.add_argument("--disable-software-rasterizer")
-    return webdriver.Chrome(options=chrome_options)
+    chrome_options.add_argument("--disable-dev-shm-usage")
 
-def check_site(driver, site_label, url, base_url, baseline):
-    """
-    Переходит по URL, получает посты и сравнивает с предыдущим baseline.
-    Возвращает новый baseline и сообщение (если найден новый пост).
-    """
+    # Создание нового экземпляра драйвера для каждого потока
+    driver = webdriver.Chrome(options=chrome_options)
+    driver.get(url)
+
     try:
-        driver.get(url)
         posts = get_all_posts(driver, base_url)
-        if posts:
-            new_baseline = posts[0]
-            if baseline and new_baseline[1] != baseline[1]:  # Если дата поста изменилась
-                message = (f"[{site_label}] Новый пост!\n"
-                           f"Заголовок: {new_baseline[0]}\n"
-                           f"Дата: {new_baseline[1]}\n"
-                           f"Ссылка: {new_baseline[2]}")
-                return new_baseline, message
-            return new_baseline, None
-    except Exception as e:
-        return
-
-def monitor_news(chat_id):
-    """Основная функция мониторинга: сначала отправляются исходные посты, затем — периодические проверки."""
-    baseline_posts = {site: None for site in SITES}
-
-    try:
-        driver = create_driver()  # Инициализация драйвера
-    except Exception as e:
-        return
-
-    # Получаем и отправляем исходные посты
-    for site, (url, base_url) in SITES.items():
-        try:
-            driver.get(url)
-            posts = get_all_posts(driver, base_url)
-            if posts:
-                baseline_posts[site] = posts[0]
-                init_message = (f"[{site}] Исходный пост:\n"
-                                f"Заголовок: {posts[0][0]}\n"
-                                f"Дата: {posts[0][1]}\n"
-                                f"Ссылка: {posts[0][2]}")
-                send_telegram_message(chat_id, init_message)
-        except Exception as e:
+        if not posts:
+            driver.quit()
             return
-    driver.quit()  # Закрытие драйвера после первичной проверки
+        # Запоминаем исходный (самый новый) пост
+        baseline_post = posts[0]
+        init_message = (
+            f"[{site_label}] Исходный пост получен:\n"
+            f"Заголовок: {baseline_post[0]}\n"
+            f"Дата: {baseline_post[1]}\n"
+            f"Ссылка: {baseline_post[2]}"
+        )
+        send_telegram_message(chat_id, init_message)
+    except Exception as e:
+        driver.quit()
+        return
 
-    # Основной цикл мониторинга
     while chat_id in active_chats:
+        time.sleep(1800)  # Проверяем раз в час
         try:
-            driver = create_driver()  # Новый драйвер для следующего цикла мониторинга
-            for site, (url, base_url) in SITES.items():
-                new_baseline, msg = check_site(driver, site, url, base_url, baseline_posts[site])
-                if msg:
-                    send_telegram_message(chat_id, msg)
-                baseline_posts[site] = new_baseline
-            driver.quit()  # Закрытие драйвера после каждой итерации
+            driver.refresh()
+            posts = get_all_posts(driver, base_url)
+            if not posts:
+                continue
+            # Собираем новые посты, которые располагаются выше baseline_post
+            new_posts = []
+            for post in posts:
+                if post[1] == baseline_post[1]:
+                    break
+                new_posts.append(post)
+            if new_posts:
+                # Отправляем новые посты в порядке появления (от старых к новым)
+                for post in reversed(new_posts):
+                    message = (
+                        f"[{site_label}] Новый пост!\n"
+                        f"Заголовок: {post[0]}\n"
+                        f"Дата: {post[1]}\n"
+                        f"Ссылка: {post[2]}"
+                    )
+                    send_telegram_message(chat_id, message)
+                # Обновляем исходный пост на самый новый
+                baseline_post = posts[0]
         except Exception as e:
             return
-        time.sleep(1800)  # Интервал проверки – 30 минут
 
+    driver.quit()
+
+# Обработчик команды /start
 @bot.message_handler(commands=['start'])
 def start_command(message):
     chat_id = message.chat.id
+
     if chat_id not in ALLOWED_CHATS:
         return
+
     if chat_id in active_chats:
         bot.send_message(chat_id, "Бот уже запущен! Мониторинг продолжается...")
         return
-    bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
-    active_chats[chat_id] = True
-    thread = threading.Thread(target=monitor_news, args=(chat_id,), daemon=True)
-    thread.start()
 
+    bot.send_message(chat_id, "Бот запущен! Начинаю мониторинг...")
+    active_chats[chat_id] = True  # Чат добавляется в активные
+
+    # Запуск мониторинга для сайта AM
+    thread_am = threading.Thread(
+        target=monitor_news_site, 
+        args=(chat_id, URL_AM, BASE_URL_AM, "RU"),
+        daemon=True
+    )
+    thread_am.start()
+
+    # Запуск мониторинга для сайта ARM
+    thread_arm = threading.Thread(
+        target=monitor_news_site, 
+        args=(chat_id, URL_ARM, BASE_URL_ARM, "AM"),
+        daemon=True
+    )
+    thread_arm.start()
+
+# Обработчик команды /stop
 @bot.message_handler(commands=['stop'])
 def stop_command(message):
     chat_id = message.chat.id
-    active_chats.pop(chat_id, None)
+    active_chats.pop(chat_id, None)  # Удаляем чат из списка активных
     bot.send_message(chat_id, "Мониторинг остановлен.")
 
+# Запуск бота
 if __name__ == "__main__":
     bot.polling(none_stop=True)
