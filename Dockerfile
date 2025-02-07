@@ -16,7 +16,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Копируем сам скрипт
-COPY script.py .
+COPY main.py .
 
 # Запускаем скрипт при старте контейнера
-CMD ["python", "script.py"]
+CMD ["python", "main.py"]
