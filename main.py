@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 
 TELEGRAM_BOT_TOKEN = "8054009340:AAFSdbb7C7xaQjaFOVgePNXCLFxdnNxgeYE"
-ALLOWED_CHATS = {1032063058, 1205943698}
+ALLOWED_CHATS = {1032063058, 287714154, 1205943698}
 
 # Определяем список источников (эндпоинтов) для мониторинга
 endpoints = [
