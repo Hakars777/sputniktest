@@ -1,22 +1,19 @@
-# Используем официальный python-образ (slim для компактности)
+# Используем официальный Python-образ (slim для компактности)
 FROM python:3.9-slim
 
-# Обновляем пакеты и ставим Chrome/Chromedriver
-RUN apt-get update && apt-get install -y \
-    chromium \
-    chromium-driver \
-    # чистим кэш apt
-    && rm -rf /var/lib/apt/lists/*
+# Отключаем запись .pyc-файлов и буферизацию вывода для корректного логирования
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Создадим рабочую папку внутри контейнера
+# Устанавливаем рабочую директорию внутри контейнера
 WORKDIR /app
 
-# Скопируем список зависимостей и установим их
+# Копируем файл зависимостей и устанавливаем их
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем сам скрипт
+# Копируем исходный код приложения
 COPY main.py .
 
-# Запускаем скрипт при старте контейнера
+# Запускаем приложение при старте контейнера
 CMD ["python", "main.py"]
