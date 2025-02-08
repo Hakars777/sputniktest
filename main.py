@@ -3,6 +3,7 @@ import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.storage.memory import MemoryStorage
+import requests
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from bs4 import BeautifulSoup
@@ -10,8 +11,39 @@ from urllib.parse import quote
 
 # Замените токен на свой
 TELEGRAM_BOT_TOKEN = "7816691902:AAGDGRYn9pILVyhlCTrE81HIaOITeHjXa1Y"
-ALLOWED_CHATS = {1032063058, 1205943698}
+ALLOWED_CHATS = {1032063058, 1205943698, 287714154}
 
+JSONBIN_API_KEY = "$2a$10$1tHNI4hiRsIHPLoD/REKHe53YIXpHRV59WoLcOM.MLfgZ3qZJtQZa"
+JSONBIN_BIN_ID = "67a7c1ceacd3cb34a8dac9dd 	"
+JSONBIN_BASE_URL = "https://api.jsonbin.io/v3/b"
+HEADERS = {
+    "Content-Type": "application/json",
+    "X-Master-Key": JSONBIN_API_KEY,
+}
+
+
+def load_chat_settings():
+    global chat_settings
+    url = f"{JSONBIN_BASE_URL}/{JSONBIN_BIN_ID}/latest"
+    try:
+        response = requests.get(url, headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()["record"]
+            # Если ключи сохранены как строки, приводим их к int
+            chat_settings = {int(k): v for k, v in data.items()} 
+        else:
+            chat_settings = {}
+    except Exception as e:
+        chat_settings = {}
+
+def save_chat_settings():
+
+    url = f"{JSONBIN_BASE_URL}/{JSONBIN_BIN_ID}"
+    try:
+        requests.put(url, headers=HEADERS, json=chat_settings)
+    except Exception as e:
+        return
+    
 # Определяем источники с дефолтными настройками
 endpoints = [
     {
@@ -31,11 +63,11 @@ endpoints = [
 # Настройки для каждого чата: { chat_id: { source: {"keywords": [список ключевых слов]}, ... } }
 chat_settings = {}
 
-# Активные задачи мониторинга: { chat_id: [список asyncio.Task, ...] }
+# Активные задачи мониторинга: { chat_id: { source: asyncio.Task, ... } }
 active_chats = {}
 
 # Глобальная сессия для HTTP-запросов
-http_session: aiohttp.ClientSession = None
+http_session = None
 
 # Инициализация бота и диспетчера с хранилищем состояний
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -43,11 +75,11 @@ dp = Dispatcher(storage=MemoryStorage())
 
 # ------------------------- Вспомогательные функции -------------------------
 
-def build_api_url(endpoint: dict, keyword: str) -> str:
+def build_api_url(endpoint, keyword):
     encoded = quote(keyword)
     return f"{endpoint['base_url']}/services/search/getmore/?query={encoded}&tags_limit=20&tags=0&g-recaptcha-response={endpoint['recaptcha']}"
 
-def parse_news(html: str, base_url: str) -> list:
+def parse_news(html, base_url):
     soup = BeautifulSoup(html, "html.parser")
     items = soup.select(".list__item")
     posts = []
@@ -66,7 +98,7 @@ def parse_news(html: str, base_url: str) -> list:
         posts.append((title, date, href))
     return posts
 
-async def fetch_news(api_url: str, base_url: str) -> str:
+async def fetch_news(api_url, base_url):
     headers = {
         "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                        "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -77,15 +109,36 @@ async def fetch_news(api_url: str, base_url: str) -> str:
         response.raise_for_status()
         return await response.text()
 
-async def send_msg(cid: int, msg: str):
+async def send_msg(cid, msg):
     if cid in ALLOWED_CHATS:
         await bot.send_message(cid, msg)
 
+# Функция для перезапуска мониторинга для конкретного источника
+async def restart_monitoring(cid, source):
+    # Находим данные endpoint по имени источника
+    for ep in endpoints:
+        if ep["name"] == source:
+            # Если мониторинг для этого источника уже запущен – отменяем его
+            if cid in active_chats and source in active_chats[cid]:
+                old_task = active_chats[cid][source]
+                old_task.cancel()
+                try:
+                    await old_task
+                except asyncio.CancelledError:
+                    pass
+            # Запускаем новый мониторинг для источника
+            task = asyncio.create_task(monitor_endpoint(cid, ep))
+            if cid not in active_chats:
+                active_chats[cid] = {}
+            active_chats[cid][source] = task
+            break
+
 # ------------------------- Мониторинг источников -------------------------
 
-async def monitor_endpoint(cid: int, endpoint: dict):
+async def monitor_endpoint(cid, endpoint):
     base_url = endpoint["base_url"]
     source_name = endpoint.get("name", base_url)
+    # Получаем настройки для данного источника
     settings = {}
     if cid in chat_settings and source_name in chat_settings[cid]:
         settings = chat_settings[cid][source_name]
@@ -147,7 +200,7 @@ class AddKeywords(StatesGroup):
     keyword = State()
 
 @dp.message(Command("addkeywords"))
-async def add_keywords_command(message: types.Message, state: FSMContext):
+async def add_keywords_command(message, state: FSMContext):
     # Формируем список кнопок для каждого источника
     buttons = [types.KeyboardButton(text=ep["name"]) for ep in endpoints]
     markup = types.ReplyKeyboardMarkup(keyboard=[buttons], one_time_keyboard=True, resize_keyboard=True)
@@ -155,7 +208,7 @@ async def add_keywords_command(message: types.Message, state: FSMContext):
     await state.set_state(AddKeywords.source)
 
 @dp.message(StateFilter(AddKeywords.source))
-async def add_keywords_source(message: types.Message, state: FSMContext):
+async def add_keywords_source(message, state: FSMContext):
     source = message.text.strip()
     available = [ep["name"] for ep in endpoints]
     if source not in available:
@@ -167,7 +220,7 @@ async def add_keywords_source(message: types.Message, state: FSMContext):
     await state.set_state(AddKeywords.keyword)
 
 @dp.message(StateFilter(AddKeywords.keyword))
-async def add_keywords_keyword(message: types.Message, state: FSMContext):
+async def add_keywords_keyword(message, state: FSMContext):
     cid = message.chat.id
     data = await state.get_data()
     source = data.get("source")
@@ -178,8 +231,12 @@ async def add_keywords_keyword(message: types.Message, state: FSMContext):
         chat_settings[cid][source] = {"keywords": []}
     chat_settings[cid][source]["keywords"].append(new_kw)
     current_list = chat_settings[cid][source]["keywords"]
-    await message.answer(f"Ключевое слово '{new_kw}' добавлено для источника '{source}'.\nТекущий список: {', '.join(current_list)}")
+    await message.answer(
+        f"Ключевое слово '{new_kw}' добавлено для источника '{source}'.\nТекущий список: {', '.join(current_list)}"
+    )
     await state.clear()
+    # Перезапускаем мониторинг для данного источника
+    await restart_monitoring(cid, source)
 
 # ------------------------- FSM для /cleankeywords -------------------------
 
@@ -187,14 +244,14 @@ class CleanKeywords(StatesGroup):
     source = State()
 
 @dp.message(Command("cleankeywords"))
-async def clean_keywords_command(message: types.Message, state: FSMContext):
+async def clean_keywords_command(message, state: FSMContext):
     buttons = [types.KeyboardButton(text=ep["name"]) for ep in endpoints]
     markup = types.ReplyKeyboardMarkup(keyboard=[buttons], one_time_keyboard=True, resize_keyboard=True)
     await message.answer("Выберите источник для сброса ключевых слов:", reply_markup=markup)
     await state.set_state(CleanKeywords.source)
 
 @dp.message(StateFilter(CleanKeywords.source))
-async def clean_keywords_source(message: types.Message, state: FSMContext):
+async def clean_keywords_source(message, state: FSMContext):
     cid = message.chat.id
     source = message.text.strip()
     available = [ep["name"] for ep in endpoints]
@@ -214,20 +271,24 @@ async def clean_keywords_source(message: types.Message, state: FSMContext):
     if cid not in chat_settings:
         chat_settings[cid] = {}
     chat_settings[cid][source] = {"keywords": default_kw}
-    await message.answer(f"Ключевые слова для источника '{source}' сброшены\nТекущий список: {', '.join(default_kw)}")
+    await message.answer(
+        f"Ключевые слова для источника '{source}' сброшены\nТекущий список: {', '.join(default_kw)}"
+    )
     await state.clear()
+    # Перезапускаем мониторинг для данного источника
+    await restart_monitoring(cid, source)
 
 # ------------------------- Обработчики команд /start и /stop -------------------------
 
 @dp.message(Command("start"))
-async def start_handler(message: types.Message):
+async def start_handler(message):
     cid = message.chat.id
     if cid not in ALLOWED_CHATS:
         return
     if cid in active_chats:
         await message.answer("Бот уже запущен! Мониторинг продолжается...")
         return
-    active_chats[cid] = []  # список задач мониторинга для данного чата
+    active_chats[cid] = {}
     if cid not in chat_settings:
         chat_settings[cid] = {}
         for ep in endpoints:
@@ -239,16 +300,15 @@ async def start_handler(message: types.Message):
         "/cleankeywords – сбросить все ключевые слова\n"
     )
     for ep in endpoints:
-        task = asyncio.create_task(monitor_endpoint(cid, ep))
-        active_chats[cid].append(task)
+        active_chats[cid][ep["name"]] = asyncio.create_task(monitor_endpoint(cid, ep))
 
 @dp.message(Command("stop"))
-async def stop_handler(message: types.Message):
+async def stop_handler(message):
     cid = message.chat.id
     if cid in active_chats:
-        tasks = active_chats.pop(cid)
-        for task in tasks:
+        for task in active_chats[cid].values():
             task.cancel()
+        del active_chats[cid]
         await message.answer("Мониторинг остановлен.")
 
 # ------------------------- Стартап и завершение работы -------------------------
@@ -256,9 +316,11 @@ async def stop_handler(message: types.Message):
 async def on_startup():
     global http_session
     http_session = aiohttp.ClientSession()
+    load_chat_settings()
 
 async def on_shutdown():
     await http_session.close()
+    save_chat_settings()
 
 async def main():
     await on_startup()
