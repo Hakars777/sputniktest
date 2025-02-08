@@ -2,3 +2,4 @@ beautifulsoup4
 aiogram
 aiohttp
 asyncio
+requests
